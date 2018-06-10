@@ -1,0 +1,51 @@
+{
+  "project_info": {
+    "project_number": "514312212459",
+    "firebase_url": "https://personalvr-a1254.firebaseio.com",
+    "project_id": "personalvr-a1254",
+    "storage_bucket": "personalvr-a1254.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:514312212459:android:6a6107d2d6f42afe",
+        "android_client_info": {
+          "package_name": "net.sytes.roneymaia.personalvr"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "514312212459-7o1nf0bjckpsskj1l9tbs5e7o02kc0vt.apps.googleusercontent.com",
+          "client_type": 3
+        },
+        {
+          "client_id": "514312212459-7o1nf0bjckpsskj1l9tbs5e7o02kc0vt.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCtPpszW54OKu70zm1Wi1beM0EXWzHx7RQ"
+        }
+      ],
+      "services": {
+        "analytics_service": {
+          "status": 1
+        },
+        "appinvite_service": {
+          "status": 2,
+          "other_platform_oauth_client": [
+            {
+              "client_id": "514312212459-7o1nf0bjckpsskj1l9tbs5e7o02kc0vt.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        },
+        "ads_service": {
+          "status": 2
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
