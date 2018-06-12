@@ -1,5 +1,6 @@
 package net.sytes.roneymaia.personalvr
 
+import android.app.Activity
 import android.location.Location
 import android.location.LocationListener
 import android.support.v7.app.AppCompatActivity
@@ -13,16 +14,19 @@ import android.location.LocationManager.NETWORK_PROVIDER
 import android.content.pm.PackageManager
 import android.support.v4.app.ActivityCompat
 import android.content.Context
+import android.content.Intent
+import android.graphics.*
 import android.location.LocationManager
+import android.net.Uri
 import com.google.android.gms.maps.model.*
 import com.google.android.gms.maps.model.Marker
 import android.os.Handler
+import android.os.Looper
 import android.os.Message
-import android.util.Base64
 import android.util.Log
 import android.view.Menu
-import android.view.MenuInflater
 import android.view.MenuItem
+import android.webkit.MimeTypeMap
 import android.widget.Toast
 import com.facebook.login.LoginManager
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -33,6 +37,10 @@ import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
 import com.google.firebase.database.IgnoreExtraProperties
+import com.google.firebase.storage.FirebaseStorage
+import com.squareup.picasso.Picasso
+import com.squareup.picasso.Transformation
+import java.io.File
 
 
 class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, ValueEventListener {
@@ -41,17 +49,40 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
     private var markerPlayer: Marker? = null
     private var locationManager: LocationManager? = null
     private var userLocNow: LatLng? = null
-    private var mapActHandler: Handler = HandlerMaps(this)
-    private var mapActThread: Thread = ThreadMaps(mapActHandler)
+    private var mapActHandler: Handler? = null
+    private var mapBmpHandler: Handler? = null
+    private var mapBmpThread: Thread? = null
     private var firebaseDb: FirebaseDatabase? = null
     private var firebaseAuth: FirebaseAuth? = null
+    private var firebaseStorage: FirebaseStorage? = null
     private var arrayMarkers: HashMap<String, UserMark> = HashMap<String, UserMark>()
-    private var emailUser: String? = null
+    private var uidUser: String? = ""
+    private var imageUser: String? = ""
     private var mapsMarkers: HashMap<String, Marker> = HashMap<String, Marker>()
+    private var bitMapsMrk: HashMap<String, Bitmap?> = HashMap<String, Bitmap?>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_maps)
+
+        MapsActivity@this.mapActHandler = object: Handler(Looper.getMainLooper()) {
+
+            override fun handleMessage(msg: android.os.Message){
+
+            }
+        }
+
+        MapsActivity@this.mapBmpHandler = object: Handler(Looper.getMainLooper()) {
+
+            override fun handleMessage(msg: android.os.Message){
+                when (msg.what) {
+                    1 -> {
+                        val myobj = msg.obj as Array<*>
+                        this@MapsActivity.bitMapsMrk[myobj[0] as String] = myobj[1] as Bitmap
+                    }
+                }
+            }
+        }
 
         MapsActivity@this.locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
@@ -59,14 +90,38 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
 
         MapsActivity@this.firebaseDb = FirebaseDatabase.getInstance()
         MapsActivity@this.firebaseAuth = FirebaseAuth.getInstance()
+        MapsActivity@this.firebaseStorage = FirebaseStorage.getInstance()
 
         val currentUser = MapsActivity@this.firebaseAuth!!.currentUser
 
-        if (currentUser == null) {
+        MapsActivity@this.uidUser = currentUser?.uid
+        SingletonControlCanvas.uid = currentUser?.uid
+        SingletonControlCanvas.firebaseDb = MapsActivity@this.firebaseDb
+
+        if (currentUser?.uid == null) {
             finish()
         }
 
-        MapsActivity@this.emailUser = Base64.encodeToString(currentUser?.email?.toByteArray(Charsets.UTF_8), Base64.NO_WRAP or Base64.URL_SAFE)
+        MapsActivity@this.firebaseDb!!
+                .getReference("/markers/")
+                .addListenerForSingleValueEvent(object : ValueEventListener{
+                    override fun onDataChange(dataSnapshot: DataSnapshot) {
+                        val status = dataSnapshot.hasChild(SingletonControlCanvas.uid)
+                        if (!status) {
+                            SingletonControlCanvas.firebaseDb!!
+                                    .getReference("/markers/" + SingletonControlCanvas.uid)
+                                    .setValue(UserMark(SingletonControlCanvas.uid, 0.0, 0.0, "on", ""))
+                        }
+
+                    }
+
+                    override fun onCancelled(databaseError: DatabaseError) {
+
+                    }
+                })
+
+
+
 
         MapsActivity@this.firebaseDb!!.getReference("/markers/").addValueEventListener(this)
 
@@ -83,7 +138,16 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
         super.onPause()
         MapsActivity@this.locationManager!!.removeUpdates(this)
         MapsActivity@this.firebaseDb!!
-                .getReference("/markers/" + MapsActivity@this.emailUser)
+                .getReference("/markers/" + MapsActivity@this.uidUser)
+                .child("state")
+                .setValue("off")
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        MapsActivity@this.locationManager!!.removeUpdates(this)
+        MapsActivity@this.firebaseDb!!
+                .getReference("/markers/" + MapsActivity@this.uidUser)
                 .child("state")
                 .setValue("off")
     }
@@ -104,9 +168,42 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
                 removeAuths()
                 return true
             }
+            R.id.camera -> {
+                val intent = Intent().setType("image/*").setAction(Intent.ACTION_GET_CONTENT)
+                startActivityForResult(intent, 100)
+                return true
+            }
 
             else -> return super.onOptionsItemSelected(item)
         }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+
+        if (requestCode == 100 && resultCode == Activity.RESULT_OK && data!!.data != null) {
+            val fileUri = data.data
+            val riversRef = MapsActivity@this.firebaseStorage!!.getReference("/uploads/" + MapsActivity@this.uidUser)
+                    .child(System.currentTimeMillis().toString() + "." + getFileExtension(fileUri))
+
+            riversRef.putFile(fileUri).addOnSuccessListener{ taskSnapshot ->
+                MapsActivity@this.imageUser = taskSnapshot.downloadUrl.toString()
+                MapsActivity@this.locationManager!!.removeUpdates(this)
+                MapsActivity@this.firebaseDb!!
+                        .getReference("/markers/" + MapsActivity@this.uidUser)
+                        .child("uri")
+                        .setValue(taskSnapshot.downloadUrl.toString())
+            }.addOnFailureListener{ exception ->
+                Toast.makeText(MapsActivity@this, "Falha em upload de imagem.", Toast.LENGTH_LONG).show()
+            }
+
+        }
+    }
+
+    fun getFileExtension(uri: Uri): String? {
+        val cr = contentResolver
+        val mime = MimeTypeMap.getSingleton()
+        return mime.getExtensionFromMimeType(cr.getType(uri))
     }
 
     override fun onMapReady(googleMap: GoogleMap) {
@@ -144,10 +241,15 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
                     .tilt(50f)
                     .build()
 
+            val maps = HashMap<String, Any>()
+
+            maps.put("lat", location.latitude)
+            maps.put("lng", location.longitude)
+            maps.put("state", "on")
+
             MapsActivity@this.userLocNow = LatLng(location.latitude, location.longitude)
             MapsActivity@this.firebaseDb!!
-                    .getReference("/markers/" + MapsActivity@this.emailUser)
-                    .setValue(UserMark(MapsActivity@this.emailUser!!, location.latitude, location.longitude, "on"))
+                    .getReference("/markers/" + MapsActivity@this.uidUser).updateChildren(maps as Map<String, Any>?)
 
             MapsActivity@this.mMap!!.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition))
         }
@@ -192,9 +294,9 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
                 // no network provider is enabled
             } else {
                 if (isGPSEnabled) {
-                    MapsActivity@ this.locationManager!!.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0, 0f, this)
+                    MapsActivity@this.locationManager!!.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0, 0f, this)
                 } else if (isNetworkEnabled) {
-                    MapsActivity@ this.locationManager!!.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 0, 0f, this)
+                    MapsActivity@this.locationManager!!.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 0, 0f, this)
                 }
             }
         }
@@ -206,6 +308,7 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
 
     override fun onDataChange(p0: DataSnapshot?) {
         checkSnap(p0)
+        getBitmaps()
         controlMarkers()
     }
 
@@ -233,6 +336,7 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
                             userMarkUpd!!.lat = marker!!.lat
                             userMarkUpd!!.lng = marker!!.lng
                             userMarkUpd!!.state = marker!!.state
+                            userMarkUpd!!.uri = marker!!.uri
                         } else {
                             MapsActivity@ this.arrayMarkers!!.put(snapuid!!, marker!!)
                         }
@@ -251,13 +355,23 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
         }
     }
 
+    fun getBitmaps() {
+
+        if (MapsActivity@this.arrayMarkers.size > 0) {
+            for (key: String in MapsActivity@this.arrayMarkers.keys) {
+                if (! MapsActivity@this.bitMapsMrk.containsKey(key) && !MapsActivity@this.arrayMarkers[key]!!.uri!!.isEmpty()) {
+                    MapsActivity@ this.bitMapsMrk[key] = null
+                    MapsActivity@this.mapBmpThread = ThreadMaps(MapsActivity@this.mapBmpHandler as Handler, MapsActivity@this.arrayMarkers[key]!!.uri!!, key)
+                    MapsActivity@this.mapBmpThread!!.start()
+                }
+            }
+        }
+
+    }
+
     fun controlMarkers() {
 
-        MapsActivity@this.mapActHandler.post({
-
-            if (MapsActivity@this.mapsMarkers.keys == null ){
-                Log.d("controlMarkers", "veio nulo")
-            }
+        MapsActivity@this.mapActHandler!!.post({
 
             for (key: String in MapsActivity@this.mapsMarkers.keys) {
                 MapsActivity@ this.mapsMarkers[key]!!.remove()
@@ -268,15 +382,15 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
             for (key: String in MapsActivity@this.arrayMarkers.keys) {
                 val usrmark = MapsActivity@ this.arrayMarkers[key]
                 val latlng = LatLng(usrmark!!.lat!!, usrmark!!.lng!!)
+                val bmp = MapsActivity@this.bitMapsMrk[key]
 
-                if (usrmark.state == "on") {
-                    val mark = MapsActivity@ this.mMap!!.addMarker(MarkerOptions().position(latlng))
+                if (usrmark.state == "on" && bmp != null) {
+                    val mark = MapsActivity@this.mMap!!.addMarker(MarkerOptions().position(latlng).icon(BitmapDescriptorFactory.fromBitmap(bmp)))
                     MapsActivity@ this.mapsMarkers[key] = mark
                 }
             }
 
-            Log.d("controlMarkers", MapsActivity@this.arrayMarkers.size.toString())
-            Log.d("controlMarkersMaps", MapsActivity@ this.mapsMarkers.size.toString())
+
         })
     }
 
@@ -296,33 +410,30 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
 
 }
 
-class HandlerMaps : Handler {
-
-    private var context: Context? = null
-
-    constructor(context: Context){
-        this.context = context
-    }
-
-    override fun handleMessage(msg: Message){
-        Toast.makeText(context, msg.obj as String, Toast.LENGTH_SHORT).show()
-    }
-}
-
 class ThreadMaps : Thread {
 
     var handler: Handler? = null
+    var uri: String? = null
+    var key: String? = null
 
-    constructor(handler: Handler){
+    constructor(handler: Handler, uri: String, key: String){
         this.handler = handler
+        this.uri = uri
+        this.key = key
     }
 
     override fun run() {
-        Thread.sleep(3000)
+
+        val bitmap = Picasso.get().load(uri).transform(CircleTransform()).resize(264, 264).get()
+
         val msg = Message()
         msg.what = 1
-        msg.obj = "Deu bom"
+        msg.obj = arrayOf(
+                key,
+                bitmap
+        )
         this.handler!!.sendMessage(msg)
+
     }
 }
 
@@ -351,13 +462,55 @@ class UserMark {
             field = value
         }
 
+    var uri: String? = null
+        get() = field
+        set(value) {
+            field = value
+        }
+
     constructor()
 
-    constructor(uid: String, lat: Double, lng: Double, state: String) {
+    constructor(uid: String?, lat: Double?, lng: Double?, state: String, uri: String?) {
         this.uid = uid
         this.lat = lat
         this.lng = lng
         this.state = state
+        this.uri = uri
+    }
+}
+
+class CircleTransform : Transformation {
+
+    override fun transform(source: Bitmap): Bitmap {
+
+        val size = Math.min(source.width, source.height)
+
+        val x = (source.width - size) / 2
+        val y = (source.height - size) / 2
+
+        val squaredBitmap = Bitmap.createBitmap(source, x, y, size, size)
+        if (squaredBitmap != source) {
+            source.recycle()
+        }
+
+        val bitmap = Bitmap.createBitmap(size, size, source.config)
+
+        val canvas = Canvas(bitmap)
+        val paint = Paint()
+        val shader = BitmapShader(squaredBitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        paint.shader = shader
+        paint.isAntiAlias = true
+
+        val r = size / 2f
+        canvas.drawCircle(r, r, r, paint)
+
+        squaredBitmap.recycle()
+        return bitmap
+    }
+
+
+    override fun key(): String {
+        return "circle"
     }
 }
 

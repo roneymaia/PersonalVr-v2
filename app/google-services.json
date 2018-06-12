@@ -15,6 +15,22 @@
       },
       "oauth_client": [
         {
+          "client_id": "514312212459-v51gorv435dsqatvsubtqbved03bdejg.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "net.sytes.roneymaia.personalvr",
+            "certificate_hash": "9abf4c415480ca2a02d5c73706ba95d5d7496b08"
+          }
+        },
+        {
+          "client_id": "514312212459-vhilbjg1i1j6sd4drbc4oktao3io398n.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "net.sytes.roneymaia.personalvr",
+            "certificate_hash": "c88421cc81689a775b0635c769db0de88dc1b3b5"
+          }
+        },
+        {
           "client_id": "514312212459-7o1nf0bjckpsskj1l9tbs5e7o02kc0vt.apps.googleusercontent.com",
           "client_type": 3
         },
