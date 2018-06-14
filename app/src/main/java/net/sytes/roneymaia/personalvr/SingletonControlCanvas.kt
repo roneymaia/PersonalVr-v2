@@ -1,5 +1,6 @@
 package net.sytes.roneymaia.personalvr
 
+import android.content.Context
 import android.content.res.AssetManager
 import com.google.android.gms.maps.model.Marker
 import com.google.firebase.database.FirebaseDatabase
@@ -37,6 +38,12 @@ object SingletonControlCanvas{
         }
 
     var firebaseDb: FirebaseDatabase? = null
+        get() = field
+        set(value) {
+            field = value
+        }
+
+    var contexto: Context? = null
         get() = field
         set(value) {
             field = value

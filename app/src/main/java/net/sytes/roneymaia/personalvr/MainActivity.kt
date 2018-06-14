@@ -28,6 +28,10 @@ import com.google.android.gms.auth.api.Auth
 import com.google.android.gms.auth.api.signin.*
 import com.google.android.gms.common.SignInButton
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.ValueEventListener
 
 class MainActivity : AppCompatActivity() {
 
@@ -49,6 +53,7 @@ class MainActivity : AppCompatActivity() {
     private var animationArrow: ValueAnimator? = null
     private var arrowFrag: ImageView? = null
     private var nIt: Int? = 0
+    private var firebaseDb: FirebaseDatabase? = null
 
     companion object {
         const val PVR_CODE = 1
@@ -69,9 +74,10 @@ class MainActivity : AppCompatActivity() {
         viewCanvas = findViewById<CustomViewCanvas>(R.id.viewCanvas) // canvas view customizada
 
         mAuth = FirebaseAuth.getInstance() // obtem a instancia de autenticacao
+        firebaseDb = FirebaseDatabase.getInstance() // obtem a instancia de autenticacao
 
         if(mAuth!!.currentUser != null){
-            startActivity(Intent(this@MainActivity, MapsActivity::class.java))
+            startActivity(Intent(MainActivity@this, MapsActivity::class.java))
         }else{
             removeAuths() // Remove autenticacoes por prevencao
         }
@@ -247,7 +253,7 @@ class MainActivity : AppCompatActivity() {
         this@MainActivity.mAuth?.signInWithEmailAndPassword(email, password)?.addOnCompleteListener(this@MainActivity) { task ->
             if (task.isSuccessful) {
                 success = true
-                startActivity(Intent(this@MainActivity, MapsActivity::class.java))
+                startMaps()
             } else {
                 Toast.makeText(this@MainActivity, "Usuário ou senha incorretos.", Toast.LENGTH_SHORT).show()
                 success = false
@@ -264,7 +270,7 @@ class MainActivity : AppCompatActivity() {
         this@MainActivity.mAuth?.signInWithCredential(credential)?.addOnCompleteListener(this@MainActivity) { task ->
             if (task.isSuccessful) {
                 val user: FirebaseUser = mAuth!!.currentUser!!
-                startActivity(Intent(this@MainActivity, MapsActivity::class.java))
+                startMaps()
             } else {
                 Log.d("FacebookLogin", "signInWithEmail:failure")
                 Toast.makeText(this@MainActivity, "Falha ao autenticar com o Facebook.",
@@ -280,7 +286,7 @@ class MainActivity : AppCompatActivity() {
                 .addOnCompleteListener(this) { task ->
                     if (task.isSuccessful) {
                         val user: FirebaseUser? = mAuth!!.currentUser
-                        startActivity(Intent(this@MainActivity, MapsActivity::class.java))
+                        startMaps()
                     } else {
                         Toast.makeText(this@MainActivity, "Falha ao autenticar com o Google.",
                                 Toast.LENGTH_SHORT).show()
@@ -320,6 +326,35 @@ class MainActivity : AppCompatActivity() {
         FirebaseAuth.getInstance().signOut()
     }
 
+    fun startMaps() {
 
+        val currentUser = MapsActivity@this.mAuth!!.currentUser
+
+        SingletonControlCanvas.uid = currentUser?.uid
+        SingletonControlCanvas.firebaseDb = MapsActivity@this.firebaseDb
+        SingletonControlCanvas.contexto = MainActivity@this
+
+        MapsActivity@this.firebaseDb!!
+                .getReference("/markers/")
+                .addListenerForSingleValueEvent(object : ValueEventListener {
+                    override fun onDataChange(dataSnapshot: DataSnapshot) {
+                        val status = dataSnapshot.hasChild(SingletonControlCanvas.uid)
+                        if (!status) {
+                            SingletonControlCanvas.firebaseDb!!
+                                    .getReference("/markers/" + SingletonControlCanvas.uid)
+                                    .setValue(UserMark(SingletonControlCanvas.uid, 0.0, 0.0, "on", ""))
+
+                        }
+
+                        startActivity(Intent(SingletonControlCanvas.contexto, MapsActivity::class.java))
+
+                    }
+
+                    override fun onCancelled(databaseError: DatabaseError) {
+
+                    }
+                })
+
+    }
 
 }

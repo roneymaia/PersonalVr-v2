@@ -51,6 +51,7 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
     private var userLocNow: LatLng? = null
     private var mapActHandler: Handler? = null
     private var mapBmpHandler: Handler? = null
+    private var mapActChk: Handler? = null
     private var mapBmpThread: Thread? = null
     private var firebaseDb: FirebaseDatabase? = null
     private var firebaseAuth: FirebaseAuth? = null
@@ -60,6 +61,8 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
     private var imageUser: String? = ""
     private var mapsMarkers: HashMap<String, Marker> = HashMap<String, Marker>()
     private var bitMapsMrk: HashMap<String, Bitmap?> = HashMap<String, Bitmap?>()
+    private var mLastLocation: Location? = null
+    private var threadChk: Thread? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,13 +75,24 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
             }
         }
 
+        MapsActivity@this.mapActChk = object: Handler(Looper.getMainLooper()) {
+
+            override fun handleMessage(msg: android.os.Message){
+
+            }
+        }
+
         MapsActivity@this.mapBmpHandler = object: Handler(Looper.getMainLooper()) {
 
             override fun handleMessage(msg: android.os.Message){
                 when (msg.what) {
                     1 -> {
                         val myobj = msg.obj as Array<*>
-                        this@MapsActivity.bitMapsMrk[myobj[0] as String] = myobj[1] as Bitmap
+                        this@MapsActivity.bitMapsMrk.put(myobj[0] as String, myobj[1] as Bitmap)
+                    }
+                    2 -> {
+                        val myobj = msg.obj as Array<*>
+                        this@MapsActivity.bitMapsMrk.put(myobj[0] as String, myobj[1] as Bitmap)
                     }
                 }
             }
@@ -102,36 +116,43 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
             finish()
         }
 
-        MapsActivity@this.firebaseDb!!
-                .getReference("/markers/")
-                .addListenerForSingleValueEvent(object : ValueEventListener{
-                    override fun onDataChange(dataSnapshot: DataSnapshot) {
-                        val status = dataSnapshot.hasChild(SingletonControlCanvas.uid)
-                        if (!status) {
-                            SingletonControlCanvas.firebaseDb!!
-                                    .getReference("/markers/" + SingletonControlCanvas.uid)
-                                    .setValue(UserMark(SingletonControlCanvas.uid, 0.0, 0.0, "on", ""))
-                        }
-
-                    }
-
-                    override fun onCancelled(databaseError: DatabaseError) {
-
-                    }
-                })
-
-
-
-
         MapsActivity@this.firebaseDb!!.getReference("/markers/").addValueEventListener(this)
 
-        //MapsActivity@this.mapActThread.start()
+        MapsActivity@this.threadChk = Thread(Runnable {
+
+                while (true) {
+                    MapsActivity@this.mapActChk!!.post(Runnable {
+                        MapsActivity@this.firebaseDb!!
+                                .getReference("/markers/" + MapsActivity@this.uidUser)
+                                .child("state")
+                                .setValue("off")
+                        MapsActivity@this.firebaseDb!!
+                                .getReference("/markers/" + MapsActivity@this.uidUser)
+                                .child("state")
+                                .setValue("on")
+
+
+                    })
+                    Thread.sleep(10000)
+                }
+
+        })
+
+        MapsActivity@this.threadChk!!.start()
 
     }
 
     override fun onResume() {
         super.onResume()
+
+        if(MapsActivity@this.mMap != null){ //prevent crashing if the map doesn't exist yet (eg. on starting activity)
+            MapsActivity@this.mMap!!.clear()
+
+            // add markers from database to the map
+        }
+
         checkPermissionsLoc()
+
     }
 
     override fun onPause() {
@@ -193,8 +214,18 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
                         .getReference("/markers/" + MapsActivity@this.uidUser)
                         .child("uri")
                         .setValue(taskSnapshot.downloadUrl.toString())
+                MapsActivity@this.locationManager!!.removeUpdates(this)
+                MapsActivity@this.firebaseDb!!
+                        .getReference("/markers/" + MapsActivity@this.uidUser)
+                        .child("state")
+                        .setValue("on")
             }.addOnFailureListener{ exception ->
                 Toast.makeText(MapsActivity@this, "Falha em upload de imagem.", Toast.LENGTH_LONG).show()
+            }
+
+            if(MapsActivity@this.mMap != null){ //prevent crashing if the map doesn't exist yet (eg. on starting activity)
+                MapsActivity@this.finish()
+                startActivity(intent)
             }
 
         }
@@ -212,13 +243,17 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
 
         MapsActivity@this.mMap!!.uiSettings.isCompassEnabled = true
         MapsActivity@this.mMap!!.mapType = GoogleMap.MAP_TYPE_NORMAL
-        val cameraPosition = CameraPosition.Builder()
-                .target(LatLng(-26.323115, -48.862916))
-                .zoom(17f)
-                .tilt(50f)
-                .build()
 
-        MapsActivity@this.mMap!!.moveCamera(CameraUpdateFactory.newCameraPosition(cameraPosition))
+        if (MapsActivity@this.mLastLocation != null) {
+            val cameraPosition = CameraPosition.Builder()
+                    .target(LatLng(MapsActivity@this.mLastLocation!!.latitude, MapsActivity@this.mLastLocation!!.longitude))
+                    .zoom(17f)
+                    .tilt(50f)
+                    .build()
+
+            MapsActivity@this.mMap!!.moveCamera(CameraUpdateFactory.newCameraPosition(cameraPosition))
+        }
+
     }
 
     override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {
@@ -260,8 +295,14 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
             200 -> {
                 // If request is cancelled, the result arrays are empty.
                 if (grantResults.size!! > 0 && grantResults[0] === PackageManager.PERMISSION_GRANTED) {
-                    finish()
-                    startActivity(intent)
+                    //MapsActivity@this.finish()
+                    //startActivity(intent)
+
+                    MapsActivity@this.locationManager!!.removeUpdates(this)
+                    MapsActivity@this.firebaseDb!!
+                            .getReference("/markers/" + MapsActivity@this.uidUser)
+                            .child("state")
+                            .setValue("on")
                 }
             }
         }
@@ -275,9 +316,9 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
         if (!(finePerm && coarsePerm)) {
             ActivityCompat.requestPermissions(this, arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION), 200)
         } else {
-            val location = MapsActivity@ this.locationManager!!.getLastKnownLocation(NETWORK_PROVIDER)
+            MapsActivity@this.mLastLocation = MapsActivity@ this.locationManager!!.getLastKnownLocation(NETWORK_PROVIDER)
 
-            onLocationChanged(location)
+            onLocationChanged(MapsActivity@this.mLastLocation)
 
             // Obtain the SupportMapFragment and get notified when the map is ready to be used.
             val mapFragment = supportFragmentManager
@@ -307,16 +348,17 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
     }
 
     override fun onDataChange(p0: DataSnapshot?) {
-        checkSnap(p0)
-        getBitmaps()
+        val upd = checkSnap(p0)
+        getBitmaps(upd)
         controlMarkers()
     }
 
-    fun checkSnap(p0: DataSnapshot?) {
+    fun checkSnap(p0: DataSnapshot?) : Boolean {
 
         var snapuid: String? = null
         var marker: UserMark? = null
         var state: String? = null
+        var upd: Boolean = false
 
         if (p0 != null){
             for (snap: DataSnapshot in p0.children){
@@ -332,11 +374,17 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
                         val contem = MapsActivity@this.arrayMarkers.containsKey(snapuid)
                         if (contem) {
                             val userMarkUpd = MapsActivity@this.arrayMarkers!![snapuid!!]
+
+                            if (userMarkUpd!!.uri != marker!!.uri) {
+                                upd = true
+                            }
+
                             userMarkUpd!!.uid = marker!!.uid
                             userMarkUpd!!.lat = marker!!.lat
                             userMarkUpd!!.lng = marker!!.lng
                             userMarkUpd!!.state = marker!!.state
                             userMarkUpd!!.uri = marker!!.uri
+
                         } else {
                             MapsActivity@ this.arrayMarkers!!.put(snapuid!!, marker!!)
                         }
@@ -353,14 +401,20 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener, 
             }
 
         }
+
+        return upd
     }
 
-    fun getBitmaps() {
+    fun getBitmaps(upd: Boolean) {
 
         if (MapsActivity@this.arrayMarkers.size > 0) {
             for (key: String in MapsActivity@this.arrayMarkers.keys) {
                 if (! MapsActivity@this.bitMapsMrk.containsKey(key) && !MapsActivity@this.arrayMarkers[key]!!.uri!!.isEmpty()) {
                     MapsActivity@ this.bitMapsMrk[key] = null
+                    MapsActivity@this.mapBmpThread = ThreadMaps(MapsActivity@this.mapBmpHandler as Handler, MapsActivity@this.arrayMarkers[key]!!.uri!!, key)
+                    MapsActivity@this.mapBmpThread!!.start()
+                } else if (MapsActivity@this.bitMapsMrk.containsKey(key) && upd) {
+                    MapsActivity@ this.bitMapsMrk.remove(key)
                     MapsActivity@this.mapBmpThread = ThreadMaps(MapsActivity@this.mapBmpHandler as Handler, MapsActivity@this.arrayMarkers[key]!!.uri!!, key)
                     MapsActivity@this.mapBmpThread!!.start()
                 }
@@ -424,15 +478,21 @@ class ThreadMaps : Thread {
 
     override fun run() {
 
-        val bitmap = Picasso.get().load(uri).transform(CircleTransform()).resize(264, 264).get()
+        try {
+            val bitmap = Picasso.get().load(uri).transform(CircleTransform()).resize(264, 264).get()
 
-        val msg = Message()
-        msg.what = 1
-        msg.obj = arrayOf(
-                key,
-                bitmap
-        )
-        this.handler!!.sendMessage(msg)
+            val msg = Message()
+            msg.what = 1
+            msg.obj = arrayOf(
+                    key,
+                    bitmap
+            )
+            this.handler!!.sendMessage(msg)
+
+        } catch (e: Exception) {
+
+        }
+
 
     }
 }
